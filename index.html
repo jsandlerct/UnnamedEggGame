@@ -117,6 +117,8 @@ function overBasket(mx, my) {
   return mx > BX - 55 && mx < BX + 55 && my > RIM_Y - 55 && my < RIM_Y + 15;
 }
 
+const ui = document.getElementById('ui');
+
 // ── Dialog helpers ───────────────────────────────────────────────────────────
 function openDlg(html, buttons) {
   dlgBody.innerHTML = html;
@@ -129,8 +131,12 @@ function openDlg(html, buttons) {
     dlgBtns.appendChild(btn);
   });
   dlg.style.display = '';
+  ui.style.pointerEvents = 'auto';  // enable clicks through the overlay
 }
-function closeDlg() { dlg.style.display = 'none'; }
+function closeDlg() {
+  dlg.style.display = 'none';
+  ui.style.pointerEvents = 'none';
+}
 
 // ── Eat logic ────────────────────────────────────────────────────────────────
 function onEat() {
@@ -240,7 +246,7 @@ function drawBasket() {
   const rimY  = BY - 42;
   const rimRX = 52, rimRY = 13;
 
-  // ① Basket body (opaque trapezoid)
+  // ① Basket body
   ctx.beginPath();
   ctx.moveTo(BX-rimRX, rimY); ctx.lineTo(BX+rimRX, rimY);
   ctx.lineTo(BX+38, BY+20);   ctx.lineTo(BX-38, BY+20);
@@ -261,23 +267,18 @@ function drawBasket() {
   }
   ctx.restore();
 
-  // ② Eggs — clipped so nothing appears below the rim's bottom edge
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, W, rimY + rimRY);
-  ctx.clip();
-  eggOval(BX-10, rimY - 44, 19, 25, 0.04);   // back row
-  eggOval(BX+16, rimY - 42, 19, 25, -0.04);
-  eggOval(BX-22, rimY - 22, 19, 25, 0.10);   // front row
-  eggOval(BX+3,  rimY - 26, 19, 25, 0);
-  eggOval(BX+26, rimY - 22, 19, 25, -0.10);
-  ctx.restore();
-
-  // ③ Rim — opaque fill hides the clipped egg edges, stroke draws the rim
+  // ② Rim (fill hides interior, stroke draws the oval lip)
   ctx.beginPath();
   ctx.ellipse(BX, rimY, rimRX, rimRY, 0, 0, Math.PI*2);
   ctx.fillStyle = BASK_C; ctx.fill();
   ctx.strokeStyle = DARK; ctx.lineWidth = 3; ctx.stroke();
+
+  // ③ Eggs ON TOP — drawn last so they appear in the basket opening
+  eggOval(BX-10, rimY - 40, 19, 25, 0.04);   // back row
+  eggOval(BX+16, rimY - 38, 19, 25, -0.04);
+  eggOval(BX-22, rimY - 25, 19, 25, 0.10);   // front row — sits at rim level
+  eggOval(BX+3,  rimY - 28, 19, 25, 0);
+  eggOval(BX+26, rimY - 25, 19, 25, -0.10);
 
   // Egg count
   if (showCount) {
