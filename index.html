@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Unnamed Egg Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #2e3e4e;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh;
+    user-select: none;
+  }
+  #wrap {
+    position: relative;
+    width: 900px; height: 500px;
+    border: 4px solid #111;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  }
+  canvas { display: block; }
+  #ui {
+    position: absolute; inset: 0;
+    display: flex; justify-content: center; align-items: center;
+    pointer-events: none;
+  }
+  .dlg {
+    background: #b8ccd8;
+    border: 3px solid #1a2838;
+    min-width: 380px; max-width: 600px;
+    font-family: 'Courier New', Courier, monospace;
+    box-shadow: 7px 7px 0 #1a2838;
+    display: none;
+    pointer-events: all;
+  }
+  .dlg-bar {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      #607888 0px, #607888 1px,
+      #3a4e60 1px, #3a4e60 3px
+    );
+    height: 20px;
+  }
+  .dlg-body {
+    padding: 28px 44px 16px;
+    text-align: center;
+    font-size: 22px;
+    line-height: 1.65;
+    color: #0a0a18;
+  }
+  .dlg-btns {
+    padding: 4px 44px 26px;
+    display: flex; gap: 16px; justify-content: center;
+  }
+  .dbtn {
+    border: 2px solid #1a2838;
+    background: #b8ccd8;
+    padding: 7px 0;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 18px;
+    cursor: pointer;
+    min-width: 140px;
+    color: #0a0a18;
+  }
+  .dbtn:hover { background: #96b0c4; }
+  .dbtn:active { background: #7898b4; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="900" height="500"></canvas>
+  <div id="ui">
+    <div class="dlg" id="dlg">
+      <div class="dlg-bar"></div>
+      <div class="dlg-body" id="dlgBody"></div>
+      <div class="dlg-btns" id="dlgBtns"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 900, H = 500;
+const dlg = document.getElementById('dlg');
+const dlgBody = document.getElementById('dlgBody');
+const dlgBtns = document.getElementById('dlgBtns');
+
+const BG     = '#8fabbc';
+const DARK   = '#111827';
+const EGG_C  = '#dceaf5';
+const BASK_C = '#8ea8bc';
+const SW     = 2.5;
+
+function rnd(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+// ── Game state ───────────────────────────────────────────────────────────────
+let phase     = 'p1';   // p1 | p2 | buy | wait | gameover | win
+let p1Eaten   = 0, p1Limit = rnd(6,12);
+let p2Eaten   = 0, p2Limit = rnd(6,12);
+let buyCount  = 80;
+let showCount = false;
+let lowAnnounced = false;
+
+// ── Eggman ───────────────────────────────────────────────────────────────────
+let emX      = 115;
+const emY    = 348;
+let emEating = false, eatTick = 0;
+let emWalking = false, walkTick = 0;
+let emTurned  = false;
+
+// ── Drag ─────────────────────────────────────────────────────────────────────
+let dragging = false, dX = 0, dY = 0;
+const BX = 778, BY = 340;            // basket centre
+const RIM_Y = BY - 38;               // top rim Y
+// Basket hit zone: the egg-filled area above and including the rim
+function overBasket(mx, my) {
+  return mx > BX - 55 && mx < BX + 55 && my > RIM_Y - 55 && my < RIM_Y + 15;
+}
+
+// ── Dialog helpers ───────────────────────────────────────────────────────────
+function openDlg(html, buttons) {
+  dlgBody.innerHTML = html;
+  dlgBtns.innerHTML = '';
+  buttons.forEach(({ text, action }) => {
+    const btn = document.createElement('button');
+    btn.className = 'dbtn';
+    btn.textContent = text;
+    btn.onclick = () => { closeDlg(); action(); };
+    dlgBtns.appendChild(btn);
+  });
+  dlg.style.display = '';
+}
+function closeDlg() { dlg.style.display = 'none'; }
+
+// ── Eat logic ────────────────────────────────────────────────────────────────
+function onEat() {
+  emEating = true; eatTick = 28;
+
+  if (phase === 'p1') {
+    p1Eaten++;
+    if (p1Eaten >= p1Limit) {
+      phase = 'wait';
+      setTimeout(() => openDlg('3 eggs.', [
+        { text: 'OK', action: () => { phase = 'p2'; } }
+      ]), 350);
+      return;
+    }
+  } else if (phase === 'p2') {
+    p2Eaten++;
+    if (p2Eaten >= p2Limit) {
+      phase = 'wait';
+      setTimeout(() => openDlg(
+        'Dude, you ran out of eggs.<br>Would you like to buy<br>an 80 pack of eggs?',
+        [
+          { text: 'YES', action: () => { phase = 'buy'; buyCount = 80; showCount = true; }},
+          { text: 'NO',  action: () => { phase = 'gameover'; } }
+        ]
+      ), 350);
+      return;
+    }
+  } else if (phase === 'buy') {
+    buyCount -= rnd(1, 4) * 10;
+    if (buyCount <= 0) {
+      phase = 'wait';
+      setTimeout(() => openDlg('Congrats big boy', [
+        { text: 'OK', action: () => { phase = 'win'; emWalking = true; } }
+      ]), 350);
+      return;
+    }
+    if (buyCount < 40 && !lowAnnounced) {
+      lowAnnounced = true;
+      phase = 'wait';
+      const n = buyCount;
+      setTimeout(() => openDlg(`You now have ${n} eggs.`, [
+        { text: 'OK', action: () => { phase = 'buy'; } }
+      ]), 350);
+      return;
+    }
+  }
+}
+
+// ── Input ────────────────────────────────────────────────────────────────────
+function canDrag() {
+  return !dragging && !emEating && phase !== 'wait' && phase !== 'gameover' && phase !== 'win';
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (!canDrag()) return;
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (overBasket(mx, my)) {
+    dragging = true; dX = mx; dY = my;
+    canvas.style.cursor = 'none';
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (dragging) { dX = mx; dY = my; return; }
+  canvas.style.cursor = (canDrag() && overBasket(mx, my)) ? 'grab' : 'default';
+});
+
+canvas.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false; canvas.style.cursor = 'default';
+  const mX = emX + 5, mY = emY - 72;
+  if (Math.hypot(dX - mX, dY - mY) < 60) {
+    onEat();
+  }
+});
+
+// ── Drawing ──────────────────────────────────────────────────────────────────
+function drawBg() {
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#7898aa';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(8, 8, W-16, H-16);
+}
+
+function drawTitle() {
+  ctx.font = 'bold 30px "Courier New"';
+  ctx.fillStyle = DARK;
+  ctx.textAlign = 'center';
+  ctx.fillText('FEED  EGGS', W/2, 54);
+}
+
+function eggOval(x, y, rx, ry, tilt) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(tilt || 0);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI*2);
+  ctx.fillStyle = EGG_C; ctx.fill();
+  ctx.strokeStyle = DARK; ctx.lineWidth = SW; ctx.stroke();
+  ctx.restore();
+}
+
+function drawBasket() {
+  const rimY  = BY - 42;
+  const rimRX = 52, rimRY = 13;
+
+  // ① Basket body (opaque trapezoid)
+  ctx.beginPath();
+  ctx.moveTo(BX-rimRX, rimY); ctx.lineTo(BX+rimRX, rimY);
+  ctx.lineTo(BX+38, BY+20);   ctx.lineTo(BX-38, BY+20);
+  ctx.closePath();
+  ctx.fillStyle = BASK_C; ctx.fill();
+  ctx.strokeStyle = DARK; ctx.lineWidth = SW; ctx.stroke();
+
+  // Horizontal lines clipped to basket body
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(BX-rimRX, rimY); ctx.lineTo(BX+rimRX, rimY);
+  ctx.lineTo(BX+38, BY+20);   ctx.lineTo(BX-38, BY+20);
+  ctx.closePath(); ctx.clip();
+  ctx.strokeStyle = DARK; ctx.lineWidth = 1.2;
+  for (let i = 0; i < 18; i++) {
+    const ly = rimY + i * 3.5;
+    ctx.beginPath(); ctx.moveTo(BX-60, ly); ctx.lineTo(BX+60, ly); ctx.stroke();
+  }
+  ctx.restore();
+
+  // ② Eggs — clipped so nothing appears below the rim's bottom edge
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, W, rimY + rimRY);
+  ctx.clip();
+  eggOval(BX-10, rimY - 44, 19, 25, 0.04);   // back row
+  eggOval(BX+16, rimY - 42, 19, 25, -0.04);
+  eggOval(BX-22, rimY - 22, 19, 25, 0.10);   // front row
+  eggOval(BX+3,  rimY - 26, 19, 25, 0);
+  eggOval(BX+26, rimY - 22, 19, 25, -0.10);
+  ctx.restore();
+
+  // ③ Rim — opaque fill hides the clipped egg edges, stroke draws the rim
+  ctx.beginPath();
+  ctx.ellipse(BX, rimY, rimRX, rimRY, 0, 0, Math.PI*2);
+  ctx.fillStyle = BASK_C; ctx.fill();
+  ctx.strokeStyle = DARK; ctx.lineWidth = 3; ctx.stroke();
+
+  // Egg count
+  if (showCount) {
+    ctx.font = 'bold 19px "Courier New"';
+    ctx.fillStyle = DARK; ctx.textAlign = 'center';
+    ctx.fillText('EGGS: ' + Math.max(0, buyCount), BX, BY + 42);
+  }
+}
+
+function drawDragEgg(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 20, 26, 0, 0, Math.PI*2);
+  ctx.fillStyle = EGG_C; ctx.fill();
+  ctx.strokeStyle = DARK; ctx.lineWidth = SW; ctx.stroke();
+  ctx.strokeStyle = DARK; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-3,-8); ctx.lineTo(2,-2); ctx.lineTo(-4,3); ctx.lineTo(1,9);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFoot(x, y) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, 27, 18, [0, 0, 10, 10]);
+  ctx.fillStyle = EGG_C; ctx.fill();
+  ctx.strokeStyle = DARK; ctx.lineWidth = SW; ctx.stroke();
+}
+
+function drawEggman() {
+  const x = emX, y = emY;
+  const bob     = emWalking ? Math.sin(walkTick * 0.18) * 4 : 0;
+  const lStep   = emWalking ? Math.sin(walkTick * 0.18) * 6 : 0;
+  const rStep   = -lStep;
+
+  // Feet
+  drawFoot(x - 34, y - 8 + lStep);
+  drawFoot(x + 7,  y - 8 + rStep);
+
+  // Body
+  ctx.beginPath();
+  ctx.ellipse(x, y - 70 + bob, 46, 62, 0, 0, Math.PI*2);
+  ctx.fillStyle = EGG_C; ctx.fill();
+  ctx.strokeStyle = DARK; ctx.lineWidth = 3; ctx.stroke();
+
+  if (!emTurned) {
+    if (emEating) {
+      // Eating face: angry squinting eyes + raised hand
+      ctx.strokeStyle = DARK; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      // Left angry eye: two lines forming a > wedge
+      ctx.beginPath();
+      ctx.moveTo(x - 20, y - 97 + bob); ctx.lineTo(x - 8,  y - 90 + bob);
+      ctx.lineTo(x - 20, y - 83 + bob);
+      ctx.stroke();
+      // Right angry eye: two lines forming a < wedge
+      ctx.beginPath();
+      ctx.moveTo(x + 28, y - 97 + bob); ctx.lineTo(x + 16, y - 90 + bob);
+      ctx.lineTo(x + 28, y - 83 + bob);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+
+    } else {
+      // Normal face: round eyes + big open mouth
+      for (const ox of [-15, 14]) {
+        ctx.beginPath();
+        ctx.arc(x + ox + 4, y - 91 + bob, 7.5, 0, Math.PI*2);
+        ctx.fillStyle = EGG_C; ctx.fill();
+        ctx.strokeStyle = DARK; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x + ox + 4, y - 91 + bob, 3, 0, Math.PI*2);
+        ctx.fillStyle = DARK; ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(x + 5, y - 68 + bob, 25, 0, Math.PI*2);
+      ctx.fillStyle = DARK; ctx.fill();
+    }
+  } else {
+    // Back side: "you win" text on body
+    ctx.font = 'bold 17px "Courier New"';
+    ctx.fillStyle = DARK; ctx.textAlign = 'center';
+    ctx.fillText('you win', x, y - 66 + bob);
+  }
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.38)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = 'bold 50px "Courier New"';
+  ctx.fillStyle = EGG_C; ctx.textAlign = 'center';
+  ctx.fillText('GAME OVER', W/2, H/2 + 18);
+}
+
+// ── Loop ─────────────────────────────────────────────────────────────────────
+function update() {
+  if (emEating) { if (--eatTick <= 0) emEating = false; }
+  if (emWalking) {
+    walkTick++;
+    const diff = W/2 - emX;
+    emX += diff * 0.04;
+    if (Math.abs(diff) < 2) {
+      emX = W/2; emWalking = false; walkTick = 0;
+      setTimeout(() => { emTurned = true; }, 550);
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  drawBg();
+  drawTitle();
+  drawEggman();
+  drawBasket();
+  if (dragging) drawDragEgg(dX, dY);
+  if (phase === 'gameover') drawGameOver();
+}
+
+(function loop() { update(); draw(); requestAnimationFrame(loop); })();
+</script>
+</body>
+</html>
